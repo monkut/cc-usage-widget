@@ -13,6 +13,7 @@ A desktop widget for Linux and macOS that displays real-time Claude Code usage s
 
 ### Title Bar
 Custom draggable title bar with:
+- **Refresh button** (↻) - Manually refresh usage data
 - **Settings button** (gear icon) - Opens the settings panel
 - **Minimize button** - Minimizes the window
 - **Close button** - Closes the application
@@ -20,16 +21,6 @@ Custom draggable title bar with:
 ### Settings Panel
 Collapsible panel with:
 - **Transparency slider** (30-100%) - Adjusts window background opacity. Setting is persisted in localStorage.
-
-### Period Selector
-Filter usage statistics by time period:
-- **Today** - Current day's usage
-- **Week** - Current week's usage
-- **Month** - Current month's usage
-- **All** - All-time usage
-
-### Refresh Button
-Manually refresh usage data. Data also auto-refreshes every 10 seconds and when Claude Code writes new data.
 
 ### Quota Section
 Two quota indicators displayed side by side:
@@ -47,36 +38,30 @@ Note: This is an *estimate* based on message counts. Anthropic's actual quota ca
 - **Reset date** - Shows next reset date (Sundays)
 - **Plan name** - Your Claude subscription plan
 
-### Token Summary
-Four-column grid showing token counts for the selected period:
-- **Input** - Standard input tokens
-- **Output** - Output tokens generated
-- **Cache R** - Cache read tokens (previously cached context)
-- **Cache W** - Cache write tokens (new cached context)
+### Activity Heatmap
+GitHub-style contribution heatmap showing prompt activity over the last 12 weeks:
+- **Grid layout** - 7 rows (days of week) × 12 columns (weeks)
+- **Color intensity** - Darker green indicates more prompts that day
+- **Tooltips** - Hover to see exact date and prompt count
 
 ### Models Section
-Per-model quota usage (5hr rolling window):
-- **Opus 4.5** (purple) - ~45 messages/5hr limit
-- **Sonnet 4** (blue) - ~225 messages/5hr limit
-- **Haiku 3.5** (green) - ~900 messages/5hr limit
+Token usage breakdown by model:
+- **Opus 4.5** (purple)
+- **Sonnet 4** (blue)
+- **Haiku 3.5** (green)
 
-Each model shows:
-- Model name with message count (e.g., "12/45")
-- Progress bar (green/yellow/red based on usage)
-- Usage percentage
-
-Sorted by highest usage percentage first.
+Each model shows the model name and total token count.
 
 ### Active Sessions
 Scrollable list of Claude Code sessions active in the last 24 hours. Each row displays:
 - **Directory** - Project directory path (truncated from start, full path in tooltip)
-- **Tokens** - Total token usage for the session
+- **Model** - Current model in use (color-coded)
+- **Context %** - Remaining context window percentage
+- **Todos** - Number of active todo items (or "-" if none)
 - **Duration** - How long the session has been active (e.g., "15m", "2h 30m")
 
-Sorted by most recent activity.
-
 ### Last Updated
-Timestamp showing when the data was last refreshed.
+Timestamp showing when the data was last refreshed. Data auto-refreshes every 10 seconds and when Claude Code writes new data.
 
 ## Installation
 
