@@ -72,12 +72,17 @@ fn load_icon() -> Image<'static> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Workaround for WebKitGTK transparent window bug on Linux
-    // https://github.com/tauri-apps/tauri/issues/10626
+    // Workarounds for WebKitGTK issues on Linux
     #[cfg(target_os = "linux")]
     {
+        // Fix transparent window rendering bug
+        // https://github.com/tauri-apps/tauri/issues/10626
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        // Disable WebKit sandbox to prevent "Could not connect to localhost"
+        // errors after system suspend/resume. WebKit's multi-process architecture
+        // uses IPC that can break when child processes become stale.
+        std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
     }
 
     tauri::Builder::default()

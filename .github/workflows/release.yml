@@ -73,12 +73,15 @@ jobs:
           chmod +x "$APPIMAGE"
           ./"$APPIMAGE" --appimage-extract
 
-          # Add WebKit workaround to GTK hook script
+          # Add WebKit workarounds to GTK hook script
           sed -i '2i\
-          # Workaround for WebKitGTK transparent window bug\
+          # Workarounds for WebKitGTK issues on Linux\
+          # Fix transparent window rendering bug\
           # https://github.com/tauri-apps/tauri/issues/10626\
           export WEBKIT_DISABLE_COMPOSITING_MODE=1\
           export WEBKIT_DISABLE_DMABUF_RENDERER=1\
+          # Disable WebKit sandbox to prevent connection errors after suspend/resume\
+          export WEBKIT_FORCE_SANDBOX=0\
           ' squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh
 
           # Repack AppImage
