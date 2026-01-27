@@ -65,6 +65,29 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
+      - name: Patch AppImage with WebKit workaround
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/appimage
+          APPIMAGE=$(ls *.AppImage)
+          chmod +x "$APPIMAGE"
+          ./"$APPIMAGE" --appimage-extract
+
+          # Add WebKit workaround to GTK hook script
+          sed -i '2i\
+          # Workaround for WebKitGTK transparent window bug\
+          # https://github.com/tauri-apps/tauri/issues/10626\
+          export WEBKIT_DISABLE_COMPOSITING_MODE=1\
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1\
+          ' squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh
+
+          # Repack AppImage
+          rm "$APPIMAGE"
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage squashfs-root "$APPIMAGE"
+          rm -rf squashfs-root appimagetool-x86_64.AppImage
+
       - name: Upload Linux artifacts
         if: matrix.platform == 'ubuntu-24.04'
         uses: actions/upload-artifact@v4
