@@ -142,7 +142,7 @@ pub fn run() {
         // Disable WebKit sandbox to prevent "Could not connect to localhost"
         // errors after system suspend/resume. WebKit's multi-process architecture
         // uses IPC that can break when child processes become stale.
-        std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
+        std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
         // Force single web process to avoid IPC issues between multiple web processes
         std::env::set_var("WEBKIT_USE_SINGLE_WEB_PROCESS", "1");
         // Disable hardware acceleration which can cause issues after suspend/resume

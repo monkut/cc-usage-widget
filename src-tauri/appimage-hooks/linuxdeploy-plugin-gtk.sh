@@ -9,7 +9,7 @@ export WEBKIT_DISABLE_DMABUF_RENDERER=1
 
 # Disable WebKit sandbox to prevent "Could not connect to localhost"
 # errors after system suspend/resume
-export WEBKIT_FORCE_SANDBOX=0
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 
 # Force single web process to avoid IPC issues between multiple web processes
 export WEBKIT_USE_SINGLE_WEB_PROCESS=1
