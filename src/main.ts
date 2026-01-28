@@ -62,6 +62,10 @@ let transparency = 85;
 let settingsOpen = false;
 let isDragging = false;
 let isRendering = false;
+let retryCount = 0;
+let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+const MAX_RETRIES = 5;
+const BASE_RETRY_DELAY_MS = 1000;
 
 function loadSettings(): void {
   const saved = localStorage.getItem("cc-widget-settings");
@@ -218,6 +222,19 @@ function toggleSettings(): void {
   }
 }
 
+function scheduleRetry(): void {
+  if (retryCount >= MAX_RETRIES) return;
+
+  const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+  retryCount++;
+
+  if (retryTimeoutId) clearTimeout(retryTimeoutId);
+  retryTimeoutId = setTimeout(() => {
+    retryTimeoutId = null;
+    fetchUsage();
+  }, delay);
+}
+
 async function fetchUsage(): Promise<void> {
   // Skip updates during window drag or ongoing render to maintain responsiveness
   if (isDragging || isRendering) return;
@@ -231,6 +248,13 @@ async function fetchUsage(): Promise<void> {
   try {
     isRendering = true;
     const stats: UsageStats = await invoke("get_usage", { period: "today" });
+
+    // Success - reset retry state
+    retryCount = 0;
+    if (retryTimeoutId) {
+      clearTimeout(retryTimeoutId);
+      retryTimeoutId = null;
+    }
 
     // Use requestAnimationFrame to batch DOM updates at the next paint cycle
     requestAnimationFrame(() => {
@@ -327,7 +351,14 @@ async function fetchUsage(): Promise<void> {
     isRendering = false;
     loadingEl.style.display = "none";
     errorEl.style.display = "block";
-    errorEl.textContent = `${e}`;
+
+    if (retryCount < MAX_RETRIES) {
+      const nextDelay = (BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)) / 1000;
+      errorEl.textContent = `Connection error. Retrying in ${nextDelay.toFixed(0)}s...`;
+      scheduleRetry();
+    } else {
+      errorEl.textContent = `${e}`;
+    }
   }
 }
 
@@ -338,6 +369,27 @@ async function setupFileWatcher(): Promise<void> {
     });
   } catch (e) {
     console.error("Failed to set up file watcher:", e);
+  }
+}
+
+async function setupSuspendHandler(): Promise<void> {
+  try {
+    await listen("system-resumed", () => {
+      // System just resumed from suspend - WebKit processes may be stale.
+      // Reset retry state and attempt to recover by reloading the page.
+      console.log("System resumed from suspend, reloading to recover WebKit state");
+      retryCount = 0;
+      if (retryTimeoutId) {
+        clearTimeout(retryTimeoutId);
+        retryTimeoutId = null;
+      }
+      // Short delay to let system stabilize after resume
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    });
+  } catch (e) {
+    console.error("Failed to set up suspend handler:", e);
   }
 }
 
@@ -413,5 +465,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   fetchUsage();
   setupFileWatcher();
+  setupSuspendHandler();
   setInterval(fetchUsage, 10000);
 });

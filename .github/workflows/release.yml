@@ -82,6 +82,10 @@ jobs:
           export WEBKIT_DISABLE_DMABUF_RENDERER=1\
           # Disable WebKit sandbox to prevent connection errors after suspend/resume\
           export WEBKIT_FORCE_SANDBOX=0\
+          # Force single web process to avoid IPC issues\
+          export WEBKIT_USE_SINGLE_WEB_PROCESS=1\
+          # Disable hardware acceleration for stability\
+          export WEBKIT_DISABLE_GPU=1\
           ' squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh
 
           # Repack AppImage

@@ -11,6 +11,12 @@ export WEBKIT_DISABLE_DMABUF_RENDERER=1
 # errors after system suspend/resume
 export WEBKIT_FORCE_SANDBOX=0
 
+# Force single web process to avoid IPC issues between multiple web processes
+export WEBKIT_USE_SINGLE_WEB_PROCESS=1
+
+# Disable hardware acceleration which can cause issues after suspend/resume
+export WEBKIT_DISABLE_GPU=1
+
 gsettings get org.gnome.desktop.interface gtk-theme 2> /dev/null | grep -qi "dark" && GTK_THEME_VARIANT="dark" || GTK_THEME_VARIANT="light"
 APPIMAGE_GTK_THEME="${APPIMAGE_GTK_THEME:-"Adwaita:$GTK_THEME_VARIANT"}" # Allow user to override theme (discouraged)
 

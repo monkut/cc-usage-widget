@@ -524,6 +524,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
+ "futures-util",
  "glob",
  "image",
  "notify",
@@ -533,6 +534,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "zbus",
 ]
 
 [[package]]
