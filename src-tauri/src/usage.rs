@@ -56,6 +56,22 @@ pub struct DailyActivity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeeklyUsage {
+    pub days: Vec<WeekDay>,           // 7 days starting from reset (Sunday)
+    pub week_start: String,           // YYYY-MM-DD of the Sunday
+    pub estimated_weekly_limit: u32,  // Max prompts allowed per week
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeekDay {
+    pub date: String,       // YYYY-MM-DD
+    pub day_name: String,   // "Sun", "Mon", etc.
+    pub prompt_count: u32,
+    pub is_today: bool,
+    pub is_future: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageStats {
     pub total_tokens: TokenUsage,
     pub total_cost_usd: f64,
@@ -65,6 +81,7 @@ pub struct UsageStats {
     pub quota: QuotaInfo,
     pub active_sessions: Vec<ActiveSession>,
     pub daily_activity: Vec<DailyActivity>,
+    pub weekly_usage: WeeklyUsage,
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,6 +373,7 @@ pub fn aggregate_usage(
     quota_window_prompts: u32,
     week_prompts: u32,
     daily_activity: Vec<DailyActivity>,
+    weekly_usage: WeeklyUsage,
 ) -> UsageStats {
     let mut by_model: HashMap<String, TokenUsage> = HashMap::new();
     let mut total = TokenUsage::default();
@@ -540,6 +558,7 @@ pub fn aggregate_usage(
         quota,
         active_sessions,
         daily_activity,
+        weekly_usage,
     }
 }
 
@@ -577,6 +596,55 @@ fn count_user_prompts_in_window(files: &[PathBuf], hours: i64) -> u32 {
     }
 
     count
+}
+
+/// Compute weekly usage breakdown for the current week (Sunday to Saturday)
+fn compute_weekly_usage(daily_activity: &[DailyActivity]) -> WeeklyUsage {
+    use chrono::Datelike;
+
+    let today = Utc::now().date_naive();
+    let today_str = today.format("%Y-%m-%d").to_string();
+
+    // Find the most recent Sunday (start of the week)
+    let days_since_sunday = today.weekday().num_days_from_sunday();
+    let week_start = today - chrono::Duration::days(days_since_sunday as i64);
+    let week_start_str = week_start.format("%Y-%m-%d").to_string();
+
+    // Build a map of date -> prompt_count from daily_activity
+    let activity_map: HashMap<String, u32> = daily_activity
+        .iter()
+        .map(|d| (d.date.clone(), d.prompt_count))
+        .collect();
+
+    let day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    // Generate 7 days of the week
+    let days: Vec<WeekDay> = (0..7)
+        .map(|i| {
+            let date = week_start + chrono::Duration::days(i);
+            let date_str = date.format("%Y-%m-%d").to_string();
+            let prompt_count = activity_map.get(&date_str).copied().unwrap_or(0);
+            let is_today = date_str == today_str;
+            let is_future = date > today;
+
+            WeekDay {
+                date: date_str,
+                day_name: day_names[i as usize].to_string(),
+                prompt_count,
+                is_today,
+                is_future,
+            }
+        })
+        .collect();
+
+    // Estimated weekly limit: 125 prompts/5hr * 7 days * 24hr / 5hr = ~4200
+    let estimated_weekly_limit: u32 = 125 * 7 * 24 / 5;
+
+    WeeklyUsage {
+        days,
+        week_start: week_start_str,
+        estimated_weekly_limit,
+    }
 }
 
 /// Collect daily user prompt counts for the last 12 weeks (84 days)
@@ -660,6 +728,9 @@ pub fn get_current_usage(period: &str) -> Result<UsageStats, String> {
     let activity_files = collect_jsonl_files(&data_dirs, Some(24 * 85));
     let daily_activity = collect_daily_activity(&activity_files);
 
+    // Compute weekly usage breakdown from daily activity
+    let weekly_usage = compute_weekly_usage(&daily_activity);
+
     let since = match period {
         "today" => Some(Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()),
         "week" => Some(Utc::now() - chrono::Duration::days(7)),
@@ -667,5 +738,5 @@ pub fn get_current_usage(period: &str) -> Result<UsageStats, String> {
         _ => None, // "all"
     };
 
-    Ok(aggregate_usage(all_entries, since, quota_window_prompts, week_prompts, daily_activity))
+    Ok(aggregate_usage(all_entries, since, quota_window_prompts, week_prompts, daily_activity, weekly_usage))
 }

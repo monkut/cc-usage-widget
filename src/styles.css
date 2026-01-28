@@ -332,6 +332,98 @@ html {
   background: rgba(251, 146, 60, 1);
 }
 
+/* Weekly Usage Chart */
+.weekly-section {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.weekly-section h3 {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.weekly-usage-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weekly-usage-chart svg {
+  width: 100%;
+  height: 70px;
+}
+
+.weekly-usage-chart .pace-line {
+  stroke: rgba(34, 197, 94, 0.6);
+  stroke-width: 1.5;
+  stroke-dasharray: 3, 2;
+}
+
+.weekly-usage-chart .week-bar rect {
+  fill: rgba(96, 165, 250, 0.7);
+  transition: fill 0.2s ease;
+}
+
+.weekly-usage-chart .week-bar.today rect {
+  fill: rgba(96, 165, 250, 1);
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 0.5;
+}
+
+.weekly-usage-chart .week-bar.future rect {
+  fill: rgba(255, 255, 255, 0.08);
+}
+
+.weekly-usage-chart .week-bar.over-pace rect {
+  fill: rgba(251, 146, 60, 0.8);
+}
+
+.weekly-usage-chart .day-label {
+  font-size: 5px;
+  fill: rgba(255, 255, 255, 0.4);
+  text-anchor: middle;
+}
+
+.weekly-usage-chart .week-bar.today .day-label {
+  fill: rgba(255, 255, 255, 0.8);
+  font-weight: bold;
+}
+
+.weekly-legend {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 0.55rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.weekly-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.weekly-legend .legend-bar {
+  width: 8px;
+  height: 8px;
+  background: rgba(96, 165, 250, 0.7);
+  border-radius: 2px;
+}
+
+.weekly-legend .legend-line {
+  width: 12px;
+  height: 2px;
+  background: rgba(34, 197, 94, 0.6);
+  border-radius: 1px;
+}
+
 /* Token Summary */
 .token-summary {
   display: grid;

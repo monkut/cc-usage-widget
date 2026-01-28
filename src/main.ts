@@ -47,6 +47,20 @@ interface DailyActivity {
   prompt_count: number;
 }
 
+interface WeekDay {
+  date: string;
+  day_name: string;
+  prompt_count: number;
+  is_today: boolean;
+  is_future: boolean;
+}
+
+interface WeeklyUsage {
+  days: WeekDay[];
+  week_start: string;
+  estimated_weekly_limit: number;
+}
+
 interface UsageStats {
   total_tokens: TokenUsage;
   total_cost_usd: number;
@@ -56,6 +70,7 @@ interface UsageStats {
   quota: QuotaInfo;
   active_sessions: ActiveSession[];
   daily_activity: DailyActivity[];
+  weekly_usage: WeeklyUsage;
 }
 
 let transparency = 85;
@@ -214,6 +229,72 @@ function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
   return html;
 }
 
+function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
+  const { days, estimated_weekly_limit } = weeklyUsage;
+
+  // Calculate cumulative usage for each day and the max for scaling
+  let cumulative = 0;
+  const cumulativeData = days.map((day) => {
+    cumulative += day.prompt_count;
+    return { ...day, cumulative };
+  });
+
+  // Find max value for scaling (either cumulative usage or daily pace target)
+  const dailyPaceTarget = estimated_weekly_limit / 7;
+  const maxCumulative = cumulativeData[cumulativeData.length - 1]?.cumulative || 0;
+  const maxValue = Math.max(maxCumulative, estimated_weekly_limit, dailyPaceTarget * 2);
+
+  // Chart dimensions (relative units, will be scaled by CSS)
+  const chartHeight = 60;
+  const barWidth = 12;
+  const barGap = 2;
+
+  // Generate bars and pace line points
+  let barsHtml = "";
+  let paceLinePoints = `0,${chartHeight}`;
+
+  for (let i = 0; i < days.length; i++) {
+    const day = cumulativeData[i];
+    const barHeight = maxValue > 0 ? (day.cumulative / maxValue) * chartHeight : 0;
+    const barX = i * (barWidth + barGap);
+    const barY = chartHeight - barHeight;
+
+    // Pace line point (linear from 0 to estimated_weekly_limit over 7 days)
+    const paceY = chartHeight - ((((i + 1) / 7) * estimated_weekly_limit) / maxValue) * chartHeight;
+    paceLinePoints += ` ${barX + barWidth / 2},${paceY}`;
+
+    // Bar styling based on state
+    let barClass = "week-bar";
+    if (day.is_today) barClass += " today";
+    else if (day.is_future) barClass += " future";
+    else if (day.cumulative > ((i + 1) / 7) * estimated_weekly_limit) barClass += " over-pace";
+
+    barsHtml += `
+      <g class="${barClass}">
+        <rect x="${barX}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="2"/>
+        <text x="${barX + barWidth / 2}" y="${chartHeight + 10}" class="day-label">${day.day_name}</text>
+      </g>
+    `;
+  }
+
+  const svgWidth = days.length * (barWidth + barGap) - barGap;
+
+  return `
+    <div class="weekly-usage-chart">
+      <svg viewBox="0 0 ${svgWidth} ${chartHeight + 15}" preserveAspectRatio="xMidYMid meet">
+        <!-- Pace line (target trajectory) -->
+        <polyline class="pace-line" points="${paceLinePoints}" fill="none"/>
+        <!-- Bars -->
+        ${barsHtml}
+      </svg>
+      <div class="weekly-legend">
+        <span class="legend-item"><span class="legend-bar"></span>Cumulative</span>
+        <span class="legend-item"><span class="legend-line"></span>Target pace</span>
+      </div>
+    </div>
+  `;
+}
+
 function toggleSettings(): void {
   settingsOpen = !settingsOpen;
   const panel = document.getElementById("settings-panel");
@@ -293,6 +374,11 @@ async function fetchUsage(): Promise<void> {
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="weekly-section">
+        <h3>Weekly Usage</h3>
+        ${renderWeeklyUsageChart(stats.weekly_usage)}
       </div>
 
       <div class="activity-section">
