@@ -79,6 +79,8 @@ let isDragging = false;
 let isRendering = false;
 let retryCount = 0;
 let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+// Use sessionStorage to persist reload state across page reloads and prevent infinite loops
+let reloadAttempted = sessionStorage.getItem("cc-widget-reload-attempted") === "true";
 const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 1000;
 
@@ -330,12 +332,13 @@ async function fetchUsage(): Promise<void> {
     isRendering = true;
     const stats: UsageStats = await invoke("get_usage", { period: "today" });
 
-    // Success - reset retry state
+    // Success - reset retry state and clear reload flag
     retryCount = 0;
     if (retryTimeoutId) {
       clearTimeout(retryTimeoutId);
       retryTimeoutId = null;
     }
+    sessionStorage.removeItem("cc-widget-reload-attempted");
 
     // Use requestAnimationFrame to batch DOM updates at the next paint cycle
     requestAnimationFrame(() => {
@@ -438,10 +441,26 @@ async function fetchUsage(): Promise<void> {
     loadingEl.style.display = "none";
     errorEl.style.display = "block";
 
+    // Log detailed error information for debugging
+    console.error("fetchUsage error:", e);
+    console.error("Error type:", typeof e);
+    if (e instanceof Error) {
+      console.error("Error name:", e.name, "message:", e.message, "stack:", e.stack);
+    }
+
+    const errorStr = String(e);
+    const isConnectionError = errorStr.includes("localhost") || errorStr.includes("Connection");
+
     if (retryCount < MAX_RETRIES) {
       const nextDelay = (BASE_RETRY_DELAY_MS * Math.pow(2, retryCount)) / 1000;
       errorEl.textContent = `Connection error. Retrying in ${nextDelay.toFixed(0)}s...`;
       scheduleRetry();
+    } else if (isConnectionError && !reloadAttempted) {
+      // WebKit IPC may be broken - try a page reload to recover
+      console.log("Connection errors exhausted retries, attempting page reload to recover WebKit");
+      sessionStorage.setItem("cc-widget-reload-attempted", "true");
+      errorEl.textContent = "Reloading to recover...";
+      setTimeout(() => window.location.reload(), 500);
     } else {
       errorEl.textContent = `${e}`;
     }
@@ -542,6 +561,32 @@ function setupSettings(): void {
   }
 }
 
+async function logWebKitEnv(): Promise<void> {
+  try {
+    const env = await invoke<Record<string, string>>("get_webkit_env");
+    console.log("WebKit environment variables:", env);
+    const expected = [
+      "WEBKIT_DISABLE_COMPOSITING_MODE",
+      "WEBKIT_DISABLE_DMABUF_RENDERER",
+      "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS",
+      "WEBKIT_USE_SINGLE_WEB_PROCESS",
+      "WEBKIT_DISABLE_GPU",
+    ];
+    const missing = expected.filter((v) => !(v in env));
+    if (missing.length > 0) {
+      console.warn("Missing WebKit environment variables:", missing);
+      // Show warning in UI for debugging
+      const errorEl = document.getElementById("error");
+      if (errorEl) {
+        errorEl.style.display = "block";
+        errorEl.textContent = `Missing WebKit env: ${missing.join(", ")}`;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to get WebKit env:", e);
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   setupTitleBar();
@@ -549,8 +594,15 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("refresh-btn")?.addEventListener("click", fetchUsage);
 
-  fetchUsage();
-  setupFileWatcher();
-  setupSuspendHandler();
-  setInterval(fetchUsage, 10000);
+  // Log WebKit environment for debugging connection issues
+  logWebKitEnv();
+
+  // Small delay before first invoke to ensure WebKit IPC is fully initialized
+  // This helps avoid "Could not connect to localhost" errors on slow system startups
+  setTimeout(() => {
+    fetchUsage();
+    setupFileWatcher();
+    setupSuspendHandler();
+    setInterval(fetchUsage, 10000);
+  }, 100);
 });

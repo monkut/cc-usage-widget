@@ -22,6 +22,22 @@ fn get_data_dirs() -> Vec<String> {
         .collect()
 }
 
+/// Debug command to check WebKit environment variables
+#[tauri::command]
+fn get_webkit_env() -> std::collections::HashMap<String, String> {
+    let vars = [
+        "WEBKIT_DISABLE_COMPOSITING_MODE",
+        "WEBKIT_DISABLE_DMABUF_RENDERER",
+        "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS",
+        "WEBKIT_USE_SINGLE_WEB_PROCESS",
+        "WEBKIT_DISABLE_GPU",
+        "GDK_BACKEND",
+    ];
+    vars.iter()
+        .filter_map(|&name| std::env::var(name).ok().map(|v| (name.to_string(), v)))
+        .collect()
+}
+
 fn setup_file_watcher(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let (tx, rx) = channel();
@@ -151,7 +167,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_usage, get_data_dirs])
+        .invoke_handler(tauri::generate_handler![get_usage, get_data_dirs, get_webkit_env])
         .setup(move |app| {
             setup_file_watcher(app.handle().clone());
 
