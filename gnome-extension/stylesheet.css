@@ -1,0 +1,19 @@
+/* CC Usage Widget Panel Styling */
+
+.cc-usage-box {
+    padding: 0 4px;
+}
+
+.cc-usage-bar {
+    border-radius: 3px;
+    margin: 4px 0;
+}
+
+.cc-usage-tooltip {
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+}

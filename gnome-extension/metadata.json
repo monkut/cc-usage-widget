@@ -1,0 +1,8 @@
+{
+  "name": "CC Usage Widget",
+  "description": "Shows Claude Code weekly usage as a progress bar in the panel",
+  "uuid": "cc-usage-widget@shane",
+  "shell-version": ["45", "46", "47"],
+  "version": 1,
+  "url": "https://github.com/shane/cc-usage-widget"
+}

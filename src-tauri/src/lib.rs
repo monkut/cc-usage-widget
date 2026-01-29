@@ -1,12 +1,17 @@
+#[cfg(target_os = "linux")]
+mod dbus_service;
 mod usage;
 
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
-use tauri::{Emitter, Manager};
 use tauri::image::Image;
+use tauri::{Emitter, Manager};
 use usage::{get_claude_data_dirs, get_current_usage, UsageStats};
+
+#[cfg(target_os = "linux")]
+use dbus_service::DbusServiceHandle;
 
 
 #[tauri::command]
@@ -38,6 +43,63 @@ fn get_webkit_env() -> std::collections::HashMap<String, String> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
+fn setup_file_watcher(app_handle: tauri::AppHandle, dbus_handle: Option<DbusServiceHandle>) {
+    thread::spawn(move || {
+        let (tx, rx) = channel();
+
+        let config = Config::default().with_poll_interval(Duration::from_secs(2));
+
+        let mut watcher: RecommendedWatcher = match Watcher::new(tx, config) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Failed to create watcher: {:?}", e);
+                return;
+            }
+        };
+
+        let data_dirs = get_claude_data_dirs();
+        for dir in &data_dirs {
+            if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+                eprintln!("Failed to watch {:?}: {:?}", dir, e);
+            }
+        }
+
+        // Create a tokio runtime for async D-Bus updates
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok();
+
+        // Debounce: only emit after no events for 500ms
+        let mut last_event = std::time::Instant::now();
+        loop {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(_) => {
+                    last_event = std::time::Instant::now();
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if last_event.elapsed() >= Duration::from_millis(500)
+                        && last_event.elapsed() < Duration::from_millis(1000)
+                    {
+                        let _ = app_handle.emit("usage-updated", ());
+
+                        // Notify D-Bus service of the change
+                        if let (Some(ref rt), Some(ref handle)) = (&rt, &dbus_handle) {
+                            let handle = handle.clone();
+                            rt.block_on(async {
+                                handle.notify_usage_changed().await;
+                            });
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
 fn setup_file_watcher(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let (tx, rx) = channel();
@@ -169,6 +231,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![get_usage, get_data_dirs, get_webkit_env])
         .setup(move |app| {
+            // Initialize D-Bus service on Linux
+            #[cfg(target_os = "linux")]
+            let dbus_handle = {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .ok();
+
+                rt.and_then(|rt| {
+                    rt.block_on(async { dbus_service::init_dbus_service().await.ok() })
+                })
+            };
+
+            #[cfg(target_os = "linux")]
+            setup_file_watcher(app.handle().clone(), dbus_handle);
+
+            #[cfg(not(target_os = "linux"))]
             setup_file_watcher(app.handle().clone());
 
             // Monitor system suspend/resume to handle WebKit process recovery
