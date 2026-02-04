@@ -75,9 +75,9 @@ interface UsageStats {
 
 let transparency = 85;
 let settingsOpen = false;
-let isRendering = false;
 let retryCount = 0;
 let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let fetchDebounceId: ReturnType<typeof setTimeout> | null = null;
 // Use sessionStorage to persist reload state across page reloads and prevent infinite loops
 let reloadAttempted = sessionStorage.getItem("cc-widget-reload-attempted") === "true";
 const MAX_RETRIES = 5;
@@ -257,8 +257,7 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
   const maxCumulative = cumulativeData[cumulativeData.length - 1]?.cumulative || 0;
   const maxValue = Math.max(maxCumulative, estimated_weekly_limit, dailyPaceTarget * 2);
 
-  // Chart dimensions
-  const chartHeight = 60;
+  // Chart dimensions (chartHeight used for reference, actual rendering uses percentages)
 
   // Generate bars and pace line points using percentage positioning
   let barsHtml = "";
@@ -332,9 +331,6 @@ function scheduleRetry(): void {
 }
 
 async function fetchUsage(): Promise<void> {
-  // Skip updates during ongoing render to maintain responsiveness
-  if (isRendering) return;
-
   const statsEl = document.getElementById("stats");
   const errorEl = document.getElementById("error");
   const loadingEl = document.getElementById("loading");
@@ -342,14 +338,7 @@ async function fetchUsage(): Promise<void> {
   if (!statsEl || !errorEl || !loadingEl) return;
 
   try {
-    isRendering = true;
-    // Safety timeout to reset isRendering if it gets stuck
-    const renderTimeout = setTimeout(() => {
-      isRendering = false;
-    }, 5000);
-
     const stats: UsageStats = await invoke("get_usage", { period: "today" });
-    clearTimeout(renderTimeout);
 
     // Success - reset retry state and clear reload flag
     retryCount = 0;
@@ -453,10 +442,8 @@ async function fetchUsage(): Promise<void> {
     `;
 
       applyTransparency();
-      isRendering = false;
     });
   } catch (e) {
-    isRendering = false;
     loadingEl.style.display = "none";
     errorEl.style.display = "block";
 
@@ -489,7 +476,12 @@ async function fetchUsage(): Promise<void> {
 async function setupFileWatcher(): Promise<void> {
   try {
     await listen("usage-updated", () => {
-      fetchUsage();
+      // Debounce file watcher updates to prevent rapid fetches
+      if (fetchDebounceId) clearTimeout(fetchDebounceId);
+      fetchDebounceId = setTimeout(() => {
+        fetchDebounceId = null;
+        fetchUsage();
+      }, 500);
     });
   } catch (e) {
     console.error("Failed to set up file watcher:", e);
@@ -521,7 +513,6 @@ async function setupTitleBar(): Promise<void> {
   const closeBtn = document.getElementById("close-btn");
   const minimizeBtn = document.getElementById("minimize-btn");
   const titleBar = document.getElementById("title-bar");
-  const container = document.querySelector(".container");
   const appWindow = getCurrentWindow();
 
   closeBtn?.addEventListener("click", async () => {
@@ -568,32 +559,6 @@ function setupSettings(): void {
 
   if (transparencyValue) {
     transparencyValue.textContent = `${transparency}%`;
-  }
-}
-
-async function logWebKitEnv(): Promise<void> {
-  try {
-    const env = await invoke<Record<string, string>>("get_webkit_env");
-    console.log("WebKit environment variables:", env);
-    const expected = [
-      "WEBKIT_DISABLE_COMPOSITING_MODE",
-      "WEBKIT_DISABLE_DMABUF_RENDERER",
-      "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS",
-      "WEBKIT_USE_SINGLE_WEB_PROCESS",
-      "WEBKIT_DISABLE_GPU",
-    ];
-    const missing = expected.filter((v) => !(v in env));
-    if (missing.length > 0) {
-      console.warn("Missing WebKit environment variables:", missing);
-      // Show warning in UI for debugging
-      const errorEl = document.getElementById("error");
-      if (errorEl) {
-        errorEl.style.display = "block";
-        errorEl.textContent = `Missing WebKit env: ${missing.join(", ")}`;
-      }
-    }
-  } catch (e) {
-    console.error("Failed to get WebKit env:", e);
   }
 }
 
