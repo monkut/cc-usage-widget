@@ -535,14 +535,13 @@ async function setupTitleBar(): Promise<void> {
 
   // Enable dragging on title bar (fallback for Linux)
   if (titleBar) {
-    titleBar.addEventListener("mousedown", (e) => {
+    titleBar.addEventListener("mousedown", async (e) => {
       // Only drag if clicking on the title bar itself, not buttons
       if ((e.target as HTMLElement).closest(".title-buttons")) return;
       if ((e.target as HTMLElement).closest(".settings-panel")) return;
       if (e.button === 0) { // Left mouse button only
-        e.preventDefault();
-        // Fire-and-forget to avoid blocking
-        appWindow.startDragging();
+        // Don't preventDefault - Tauri needs native events for dragging
+        await appWindow.startDragging();
       }
     });
   }

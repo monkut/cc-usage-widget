@@ -49,9 +49,13 @@ html {
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  /* cursor: grab disabled - can cause rendering issues on Linux WebKitGTK */
+  cursor: grab;
   user-select: none;
   min-height: 40px;
+}
+
+.title-bar:active {
+  cursor: grabbing;
 }
 
 .title-text {
