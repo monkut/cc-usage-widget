@@ -17,13 +17,13 @@
         "label": "main",
         "title": "Claude Code Usage",
         "width": 360,
-        "height": 540,
+        "height": 800,
         "resizable": true,
         "minWidth": 320,
         "minHeight": 500,
         "maximizable": false,
-        "transparent": true,
-        "decorations": false
+        "transparent": false,
+        "decorations": true
       }
     ],
     "security": {

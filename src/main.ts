@@ -160,32 +160,34 @@ function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
     if (day.prompt_count > maxCount) maxCount = day.prompt_count;
   }
 
-  // Generate 12 weeks of dates (84 days), ending today
+  // Generate exactly 12 weeks of dates, ending on Saturday of current week
+  // This ensures the grid is always full with the latest week on the far-right
   const today = new Date();
-  const days: { date: string; count: number; dayOfWeek: number }[] = [];
+  const todayDow = today.getDay(); // 0=Sun, 6=Sat
 
-  for (let i = 83; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
+  // Find the Saturday of the current week (end of the rightmost column)
+  const endDate = new Date(today);
+  endDate.setDate(today.getDate() + (6 - todayDow));
+
+  // Go back 12 weeks (84 days) from that Saturday to get the starting Sunday
+  const startDate = new Date(endDate);
+  startDate.setDate(endDate.getDate() - 83);
+
+  // Generate all 84 days (12 complete weeks)
+  const days: { date: string; count: number; dayOfWeek: number; isFuture: boolean }[] = [];
+  for (let i = 0; i < 84; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
     const dateStr = d.toISOString().split("T")[0];
     const count = activityMap.get(dateStr) || 0;
-    days.push({ date: dateStr, count, dayOfWeek: d.getDay() });
+    const isFuture = d > today;
+    days.push({ date: dateStr, count, dayOfWeek: d.getDay(), isFuture });
   }
 
-  // Group by week (columns) - each column is a week
-  // Rows are days of week (Sun=0 at top, Sat=6 at bottom)
-  const weeks: { date: string; count: number; dayOfWeek: number }[][] = [];
-  let currentWeek: { date: string; count: number; dayOfWeek: number }[] = [];
-
-  for (const day of days) {
-    if (day.dayOfWeek === 0 && currentWeek.length > 0) {
-      weeks.push(currentWeek);
-      currentWeek = [];
-    }
-    currentWeek.push(day);
-  }
-  if (currentWeek.length > 0) {
-    weeks.push(currentWeek);
+  // Group into exactly 12 weeks (7 days each)
+  const weeks: { date: string; count: number; dayOfWeek: number; isFuture: boolean }[][] = [];
+  for (let w = 0; w < 12; w++) {
+    weeks.push(days.slice(w * 7, (w + 1) * 7));
   }
 
   // Get intensity level (0-4) based on count
@@ -213,15 +215,15 @@ function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
       html += '<span class="heatmap-label"></span>';
     }
 
-    // For each week (column)
+    // For each week (column) - weeks are already in order, 12 complete weeks
     for (const week of weeks) {
-      const dayData = week.find((d) => d.dayOfWeek === dow);
-      if (dayData) {
+      const dayData = week[dow]; // Direct index since each week has all 7 days in order
+      if (dayData.isFuture) {
+        html += '<div class="heatmap-cell future"></div>';
+      } else {
         const level = getLevel(dayData.count);
         const tooltip = `${dayData.date}: ${dayData.count}`;
         html += `<div class="heatmap-cell level-${level}" data-tooltip="${tooltip}"></div>`;
-      } else {
-        html += '<div class="heatmap-cell empty"></div>';
       }
     }
     html += "</div>";
