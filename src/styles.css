@@ -32,7 +32,8 @@ html {
   padding: 0 14px 14px 14px;
   margin: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  /* box-shadow disabled - causes performance issues on Linux WebKitGTK */
+  /* box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); */
   overflow: hidden;
   height: calc(100vh - 12px);
   display: flex;
@@ -48,13 +49,9 @@ html {
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  cursor: grab;
+  /* cursor: grab disabled - can cause rendering issues on Linux WebKitGTK */
   user-select: none;
   min-height: 40px;
-}
-
-.title-bar:active {
-  cursor: grabbing;
 }
 
 .title-text {
@@ -81,7 +78,7 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .title-btn:hover {
@@ -218,7 +215,7 @@ html {
 .quota-bar {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .quota-details {
@@ -298,7 +295,7 @@ html {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
   z-index: 100;
   margin-bottom: 4px;
 }
@@ -372,7 +369,7 @@ html {
 
 .weekly-usage-chart .week-bar rect {
   fill: rgba(96, 165, 250, 0.7);
-  transition: fill 0.2s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .weekly-usage-chart .week-bar.today rect {

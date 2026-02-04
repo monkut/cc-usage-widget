@@ -75,7 +75,6 @@ interface UsageStats {
 
 let transparency = 85;
 let settingsOpen = false;
-let isDragging = false;
 let isRendering = false;
 let retryCount = 0;
 let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -333,8 +332,8 @@ function scheduleRetry(): void {
 }
 
 async function fetchUsage(): Promise<void> {
-  // Skip updates during window drag or ongoing render to maintain responsiveness
-  if (isDragging || isRendering) return;
+  // Skip updates during ongoing render to maintain responsiveness
+  if (isRendering) return;
 
   const statsEl = document.getElementById("stats");
   const errorEl = document.getElementById("error");
@@ -344,7 +343,13 @@ async function fetchUsage(): Promise<void> {
 
   try {
     isRendering = true;
+    // Safety timeout to reset isRendering if it gets stuck
+    const renderTimeout = setTimeout(() => {
+      isRendering = false;
+    }, 5000);
+
     const stats: UsageStats = await invoke("get_usage", { period: "today" });
+    clearTimeout(renderTimeout);
 
     // Success - reset retry state and clear reload flag
     retryCount = 0;
@@ -536,11 +541,8 @@ async function setupTitleBar(): Promise<void> {
       if ((e.target as HTMLElement).closest(".settings-panel")) return;
       if (e.button === 0) { // Left mouse button only
         e.preventDefault();
-        isDragging = true;
-        // Fire-and-forget to avoid blocking drag start
-        appWindow.startDragging().finally(() => {
-          isDragging = false;
-        });
+        // Fire-and-forget to avoid blocking
+        appWindow.startDragging();
       }
     });
   }
