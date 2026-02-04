@@ -371,7 +371,9 @@ pub fn aggregate_usage(
     entries: Vec<ParsedEntry>,
     since: Option<DateTime<Utc>>,
     quota_window_prompts: u32,
-    week_prompts: u32,
+    quota_window_weighted: f64,
+    _week_prompts: u32,
+    week_weighted: f64,
     daily_activity: Vec<DailyActivity>,
     weekly_usage: WeeklyUsage,
 ) -> UsageStats {
@@ -480,14 +482,16 @@ pub fn aggregate_usage(
     let total_cost: f64 = model_usages.iter().map(|m| m.cost_usd).sum();
 
     // Estimate quota - Max 5x plan defaults (based on Anthropic docs: 50-200 prompts/5hr)
-    // Using 125 as midpoint estimate
-    let estimated_limit: u32 = 125;
-    let usage_percent = (quota_window_prompts as f64 / estimated_limit as f64 * 100.0).min(100.0);
+    // Using 217 as the base limit for Sonnet-equivalent prompts (calibrated to match Claude /usage)
+    // Weighted count accounts for model costs (Opus counts 2.75x, Haiku counts 0.25x)
+    let estimated_limit: u32 = 217;
+    let usage_percent = (quota_window_weighted / estimated_limit as f64 * 100.0).min(100.0);
 
-    // Weekly limit estimation (assume ~210 hours/week for Max 5x based on 140-280 range)
+    // Weekly limit estimation - calibrated to match Claude /usage output
+    // Based on observed data: weekly limit is roughly 2990 Sonnet-equivalent prompts
     let week_limit_hours: u32 = 210;
-    let week_estimated_prompts: u32 = 125 * 7 * 24 / 5; // ~4200 prompts/week
-    let week_usage_percent = (week_prompts as f64 / week_estimated_prompts as f64 * 100.0).min(100.0);
+    let week_estimated_prompts: u32 = 2990; // Calibrated based on observed Claude /usage
+    let week_usage_percent = (week_weighted / week_estimated_prompts as f64 * 100.0).min(100.0);
 
     let quota = QuotaInfo {
         messages_in_window: quota_window_prompts,
@@ -560,6 +564,123 @@ pub fn aggregate_usage(
         daily_activity,
         weekly_usage,
     }
+}
+
+/// Get model weight for quota calculation
+/// Claude's rate limiting weights usage by model - Opus uses more quota than Sonnet/Haiku
+/// Weights calibrated based on observed Claude /usage percentages
+fn get_model_quota_weight(model: &str) -> f64 {
+    if model.contains("opus") {
+        2.75 // Opus uses ~2.75x quota vs Sonnet based on observed rate limits
+    } else if model.contains("haiku") {
+        0.25 // Haiku is much cheaper
+    } else {
+        1.0 // Sonnet is baseline
+    }
+}
+
+/// Parse a line and return (type, timestamp, model) where model is only present for assistant messages
+fn parse_entry_info(line: &str) -> Option<(String, String, Option<String>)> {
+    let entry: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
+
+    let entry_type = entry.get("type").and_then(|t| t.as_str())?.to_string();
+    let timestamp = entry.get("timestamp").and_then(|t| t.as_str())?.to_string();
+
+    let model = if entry_type == "assistant" {
+        entry
+            .get("message")
+            .and_then(|m| m.get("model"))
+            .and_then(|m| m.as_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    Some((entry_type, timestamp, model))
+}
+
+/// Check if a line is an actual user prompt (not tool_result-only)
+fn is_user_prompt(line: &str) -> bool {
+    let entry: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    if entry.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return false;
+    }
+
+    let content = match entry.get("message").and_then(|m| m.get("content")) {
+        Some(c) => c,
+        None => return false,
+    };
+
+    if content.is_string() {
+        return true;
+    }
+
+    if let Some(arr) = content.as_array() {
+        return arr
+            .iter()
+            .any(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"));
+    }
+
+    false
+}
+
+/// Count model-weighted usage in a time window
+/// Counts user prompts weighted by the model of the subsequent assistant response
+fn count_weighted_usage_in_window(files: &[PathBuf], hours: i64) -> f64 {
+    let window_start = Utc::now() - chrono::Duration::hours(hours);
+    let mut weighted_count: f64 = 0.0;
+
+    for path in files {
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+
+        // Track model from assistant responses - we'll use the most recent model
+        // seen before each user prompt as the "current model" for that session
+        let mut current_model: Option<String> = None;
+
+        for line in &lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Parse entry to get type, timestamp, and model (if assistant)
+            if let Some((entry_type, ts_str, model)) = parse_entry_info(line) {
+                // Update current model when we see assistant messages
+                if entry_type == "assistant" {
+                    if let Some(m) = model {
+                        current_model = Some(m);
+                    }
+                }
+
+                // Count user prompts within the time window
+                if entry_type == "user" && is_user_prompt(line) {
+                    if let Ok(ts) = DateTime::parse_from_rfc3339(&ts_str) {
+                        if ts >= window_start {
+                            // Use the current model's weight (default to Sonnet if unknown)
+                            let weight = current_model
+                                .as_ref()
+                                .map(|m| get_model_quota_weight(m))
+                                .unwrap_or(1.0);
+                            weighted_count += weight;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    weighted_count
 }
 
 /// Count actual user prompts (excluding tool_result-only messages) in a time window
@@ -637,8 +758,9 @@ fn compute_weekly_usage(daily_activity: &[DailyActivity]) -> WeeklyUsage {
         })
         .collect();
 
-    // Estimated weekly limit: 125 prompts/5hr * 7 days * 24hr / 5hr = ~4200
-    let estimated_weekly_limit: u32 = 125 * 7 * 24 / 5;
+    // Estimated weekly limit - calibrated based on observed Claude /usage
+    // Note: this is raw prompt count for chart display, not weighted
+    let estimated_weekly_limit: u32 = 1100; // ~3050 weighted / 2.75 avg weight
 
     WeeklyUsage {
         days,
@@ -719,10 +841,12 @@ pub fn get_current_usage(period: &str) -> Result<UsageStats, String> {
     // 5hr window: files modified in last 6 hours
     let five_hr_files = collect_jsonl_files(&data_dirs, Some(6));
     let quota_window_prompts = count_user_prompts_in_window(&five_hr_files, 5);
+    let quota_window_weighted = count_weighted_usage_in_window(&five_hr_files, 5);
 
     // Week window: files modified in last 8 days
     let week_files = collect_jsonl_files(&data_dirs, Some(24 * 8));
     let week_prompts = count_user_prompts_in_window(&week_files, 24 * 7);
+    let week_weighted = count_weighted_usage_in_window(&week_files, 24 * 7);
 
     // Daily activity: files modified in last 85 days (84 + 1 buffer)
     let activity_files = collect_jsonl_files(&data_dirs, Some(24 * 85));
@@ -738,5 +862,14 @@ pub fn get_current_usage(period: &str) -> Result<UsageStats, String> {
         _ => None, // "all"
     };
 
-    Ok(aggregate_usage(all_entries, since, quota_window_prompts, week_prompts, daily_activity, weekly_usage))
+    Ok(aggregate_usage(
+        all_entries,
+        since,
+        quota_window_prompts,
+        quota_window_weighted,
+        week_prompts,
+        week_weighted,
+        daily_activity,
+        weekly_usage,
+    ))
 }
