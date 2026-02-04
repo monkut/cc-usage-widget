@@ -389,14 +389,21 @@ html {
   fill: rgba(251, 146, 60, 0.8);
 }
 
-.weekly-usage-chart .day-label {
-  font-size: 5px;
-  fill: rgba(255, 255, 255, 0.4);
-  text-anchor: middle;
+.weekly-day-labels {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 4px;
 }
 
-.weekly-usage-chart .week-bar.today .day-label {
-  fill: rgba(255, 255, 255, 0.8);
+.weekly-day-labels .day-label {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  flex: 1;
+}
+
+.weekly-day-labels .day-label.today {
+  color: rgba(255, 255, 255, 0.8);
   font-weight: bold;
 }
 

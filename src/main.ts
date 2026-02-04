@@ -258,24 +258,24 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
   const maxCumulative = cumulativeData[cumulativeData.length - 1]?.cumulative || 0;
   const maxValue = Math.max(maxCumulative, estimated_weekly_limit, dailyPaceTarget * 2);
 
-  // Chart dimensions (relative units, will be scaled by CSS)
+  // Chart dimensions
   const chartHeight = 60;
-  const barWidth = 12;
-  const barGap = 2;
 
-  // Generate bars and pace line points
+  // Generate bars and pace line points using percentage positioning
   let barsHtml = "";
-  let paceLinePoints = `0,${chartHeight}`;
+  let paceLinePoints = "0,100";
+  let labelsHtml = "";
 
   for (let i = 0; i < days.length; i++) {
     const day = cumulativeData[i];
-    const barHeight = maxValue > 0 ? (day.cumulative / maxValue) * chartHeight : 0;
-    const barX = i * (barWidth + barGap);
-    const barY = chartHeight - barHeight;
+    const barHeightPercent = maxValue > 0 ? (day.cumulative / maxValue) * 100 : 0;
+    const barXPercent = (i / days.length) * 100;
+    const barWidthPercent = 100 / days.length - 1; // Leave small gap
 
     // Pace line point (linear from 0 to estimated_weekly_limit over 7 days)
-    const paceY = chartHeight - ((((i + 1) / 7) * estimated_weekly_limit) / maxValue) * chartHeight;
-    paceLinePoints += ` ${barX + barWidth / 2},${paceY}`;
+    const paceYPercent = 100 - ((((i + 1) / 7) * estimated_weekly_limit) / maxValue) * 100;
+    const paceXPercent = ((i + 0.5) / days.length) * 100;
+    paceLinePoints += ` ${paceXPercent},${paceYPercent}`;
 
     // Bar styling based on state
     let barClass = "week-bar";
@@ -285,22 +285,24 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
 
     barsHtml += `
       <g class="${barClass}">
-        <rect x="${barX}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="2"/>
-        <text x="${barX + barWidth / 2}" y="${chartHeight + 10}" class="day-label">${day.day_name}</text>
+        <rect x="${barXPercent}%" y="${100 - barHeightPercent}%" width="${barWidthPercent}%" height="${barHeightPercent}%" rx="2"/>
       </g>
     `;
-  }
 
-  const svgWidth = days.length * (barWidth + barGap) - barGap;
+    // Day label (HTML, not SVG)
+    const labelClass = day.is_today ? "day-label today" : "day-label";
+    labelsHtml += `<span class="${labelClass}">${day.day_name}</span>`;
+  }
 
   return `
     <div class="weekly-usage-chart">
-      <svg viewBox="0 0 ${svgWidth} ${chartHeight + 15}" preserveAspectRatio="none">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
         <!-- Pace line (target trajectory) -->
         <polyline class="pace-line" points="${paceLinePoints}" fill="none"/>
         <!-- Bars -->
         ${barsHtml}
       </svg>
+      <div class="weekly-day-labels">${labelsHtml}</div>
       <div class="weekly-legend">
         <span class="legend-item"><span class="legend-bar"></span>Cumulative</span>
         <span class="legend-item"><span class="legend-line"></span>Target pace</span>
