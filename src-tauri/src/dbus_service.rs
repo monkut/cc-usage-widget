@@ -74,6 +74,8 @@ impl UsageService {
 #[derive(Clone)]
 pub struct DbusServiceHandle {
     service: Arc<UsageService>,
+    /// Keep the D-Bus connection alive for the lifetime of the handle
+    _connection: Arc<Connection>,
 }
 
 impl DbusServiceHandle {
@@ -85,7 +87,7 @@ impl DbusServiceHandle {
 
 /// Initialize and run the D-Bus service on the session bus.
 /// Returns a handle for updating the service cache.
-pub async fn init_dbus_service() -> Result<DbusServiceHandle> {
+async fn init_dbus_service() -> Result<DbusServiceHandle> {
     let service = Arc::new(UsageService::new());
 
     // Pre-populate the cache
@@ -104,15 +106,53 @@ pub async fn init_dbus_service() -> Result<DbusServiceHandle> {
         .at("/com/shane/CCUsageWidget", (*service).clone())
         .await?;
 
-    // Keep the connection alive by spawning a task that holds it
-    tokio::spawn(async move {
-        // The connection stays alive as long as this task runs
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-        }
+    // Keep the connection alive by storing it in the handle
+    Ok(DbusServiceHandle {
+        service,
+        _connection: Arc::new(connection),
+    })
+}
+
+/// Spawn the D-Bus service on a dedicated thread with its own tokio runtime.
+/// This ensures the runtime stays alive to handle D-Bus method calls.
+pub fn spawn_dbus_service() -> Option<DbusServiceHandle> {
+    use std::sync::mpsc;
+    use std::thread;
+
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("Failed to create D-Bus runtime: {:?}", e);
+                let _ = tx.send(None);
+                return;
+            }
+        };
+
+        rt.block_on(async {
+            match init_dbus_service().await {
+                Ok(handle) => {
+                    let _ = tx.send(Some(handle.clone()));
+                    // Keep the runtime alive by running forever
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize D-Bus service: {:?}", e);
+                    let _ = tx.send(None);
+                }
+            }
+        });
     });
 
-    Ok(DbusServiceHandle { service })
+    // Wait for the service to initialize (with timeout)
+    rx.recv_timeout(std::time::Duration::from_secs(5)).ok().flatten()
 }
 
 impl Clone for UsageService {

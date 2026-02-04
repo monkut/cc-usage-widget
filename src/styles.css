@@ -312,6 +312,11 @@ html {
   background: transparent;
 }
 
+.heatmap-cell.future {
+  background: rgba(255, 255, 255, 0.02);
+  opacity: 0.5;
+}
+
 .heatmap-cell.level-0 {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -477,11 +482,8 @@ html {
   padding: 8px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.04);
-  flex: 1;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 .sessions-section h3 {
@@ -540,8 +542,9 @@ html {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
-  flex: 1;
   min-height: 0;
+  /* Show up to 5 sessions before scrolling: 5 rows * ~24px each */
+  max-height: 120px;
 }
 
 .sessions-list::-webkit-scrollbar {

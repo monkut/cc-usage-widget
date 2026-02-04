@@ -232,17 +232,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_usage, get_data_dirs, get_webkit_env])
         .setup(move |app| {
             // Initialize D-Bus service on Linux
+            // Runs on a dedicated thread with its own tokio runtime to keep the connection alive
             #[cfg(target_os = "linux")]
-            let dbus_handle = {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .ok();
-
-                rt.and_then(|rt| {
-                    rt.block_on(async { dbus_service::init_dbus_service().await.ok() })
-                })
-            };
+            let dbus_handle = dbus_service::spawn_dbus_service();
 
             #[cfg(target_os = "linux")]
             setup_file_watcher(app.handle().clone(), dbus_handle);
