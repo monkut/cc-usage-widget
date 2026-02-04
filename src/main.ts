@@ -75,10 +75,9 @@ interface UsageStats {
 
 let transparency = 85;
 let settingsOpen = false;
-let isDragging = false;
-let isRendering = false;
 let retryCount = 0;
 let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let fetchDebounceId: ReturnType<typeof setTimeout> | null = null;
 // Use sessionStorage to persist reload state across page reloads and prevent infinite loops
 let reloadAttempted = sessionStorage.getItem("cc-widget-reload-attempted") === "true";
 const MAX_RETRIES = 5;
@@ -173,14 +172,24 @@ function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
   const startDate = new Date(endDate);
   startDate.setDate(endDate.getDate() - 83);
 
+  // Helper to format date as YYYY-MM-DD in local timezone
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayStr = formatLocalDate(today);
+
   // Generate all 84 days (12 complete weeks)
   const days: { date: string; count: number; dayOfWeek: number; isFuture: boolean }[] = [];
   for (let i = 0; i < 84; i++) {
     const d = new Date(startDate);
     d.setDate(startDate.getDate() + i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = formatLocalDate(d);
     const count = activityMap.get(dateStr) || 0;
-    const isFuture = d > today;
+    const isFuture = dateStr > todayStr;
     days.push({ date: dateStr, count, dayOfWeek: d.getDay(), isFuture });
   }
 
@@ -248,24 +257,23 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
   const maxCumulative = cumulativeData[cumulativeData.length - 1]?.cumulative || 0;
   const maxValue = Math.max(maxCumulative, estimated_weekly_limit, dailyPaceTarget * 2);
 
-  // Chart dimensions (relative units, will be scaled by CSS)
-  const chartHeight = 60;
-  const barWidth = 12;
-  const barGap = 2;
+  // Chart dimensions (chartHeight used for reference, actual rendering uses percentages)
 
-  // Generate bars and pace line points
+  // Generate bars and pace line points using percentage positioning
   let barsHtml = "";
-  let paceLinePoints = `0,${chartHeight}`;
+  let paceLinePoints = "0,100";
+  let labelsHtml = "";
 
   for (let i = 0; i < days.length; i++) {
     const day = cumulativeData[i];
-    const barHeight = maxValue > 0 ? (day.cumulative / maxValue) * chartHeight : 0;
-    const barX = i * (barWidth + barGap);
-    const barY = chartHeight - barHeight;
+    const barHeightPercent = maxValue > 0 ? (day.cumulative / maxValue) * 100 : 0;
+    const barXPercent = (i / days.length) * 100;
+    const barWidthPercent = 100 / days.length - 1; // Leave small gap
 
     // Pace line point (linear from 0 to estimated_weekly_limit over 7 days)
-    const paceY = chartHeight - ((((i + 1) / 7) * estimated_weekly_limit) / maxValue) * chartHeight;
-    paceLinePoints += ` ${barX + barWidth / 2},${paceY}`;
+    const paceYPercent = 100 - ((((i + 1) / 7) * estimated_weekly_limit) / maxValue) * 100;
+    const paceXPercent = ((i + 0.5) / days.length) * 100;
+    paceLinePoints += ` ${paceXPercent},${paceYPercent}`;
 
     // Bar styling based on state
     let barClass = "week-bar";
@@ -275,22 +283,24 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
 
     barsHtml += `
       <g class="${barClass}">
-        <rect x="${barX}" y="${barY}" width="${barWidth}" height="${barHeight}" rx="2"/>
-        <text x="${barX + barWidth / 2}" y="${chartHeight + 10}" class="day-label">${day.day_name}</text>
+        <rect x="${barXPercent}%" y="${100 - barHeightPercent}%" width="${barWidthPercent}%" height="${barHeightPercent}%" rx="2"/>
       </g>
     `;
-  }
 
-  const svgWidth = days.length * (barWidth + barGap) - barGap;
+    // Day label (HTML, not SVG)
+    const labelClass = day.is_today ? "day-label today" : "day-label";
+    labelsHtml += `<span class="${labelClass}">${day.day_name}</span>`;
+  }
 
   return `
     <div class="weekly-usage-chart">
-      <svg viewBox="0 0 ${svgWidth} ${chartHeight + 15}" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
         <!-- Pace line (target trajectory) -->
         <polyline class="pace-line" points="${paceLinePoints}" fill="none"/>
         <!-- Bars -->
         ${barsHtml}
       </svg>
+      <div class="weekly-day-labels">${labelsHtml}</div>
       <div class="weekly-legend">
         <span class="legend-item"><span class="legend-bar"></span>Cumulative</span>
         <span class="legend-item"><span class="legend-line"></span>Target pace</span>
@@ -321,9 +331,6 @@ function scheduleRetry(): void {
 }
 
 async function fetchUsage(): Promise<void> {
-  // Skip updates during window drag or ongoing render to maintain responsiveness
-  if (isDragging || isRendering) return;
-
   const statsEl = document.getElementById("stats");
   const errorEl = document.getElementById("error");
   const loadingEl = document.getElementById("loading");
@@ -331,7 +338,6 @@ async function fetchUsage(): Promise<void> {
   if (!statsEl || !errorEl || !loadingEl) return;
 
   try {
-    isRendering = true;
     const stats: UsageStats = await invoke("get_usage", { period: "today" });
 
     // Success - reset retry state and clear reload flag
@@ -436,10 +442,8 @@ async function fetchUsage(): Promise<void> {
     `;
 
       applyTransparency();
-      isRendering = false;
     });
   } catch (e) {
-    isRendering = false;
     loadingEl.style.display = "none";
     errorEl.style.display = "block";
 
@@ -472,7 +476,12 @@ async function fetchUsage(): Promise<void> {
 async function setupFileWatcher(): Promise<void> {
   try {
     await listen("usage-updated", () => {
-      fetchUsage();
+      // Debounce file watcher updates to prevent rapid fetches
+      if (fetchDebounceId) clearTimeout(fetchDebounceId);
+      fetchDebounceId = setTimeout(() => {
+        fetchDebounceId = null;
+        fetchUsage();
+      }, 500);
     });
   } catch (e) {
     console.error("Failed to set up file watcher:", e);
@@ -504,7 +513,6 @@ async function setupTitleBar(): Promise<void> {
   const closeBtn = document.getElementById("close-btn");
   const minimizeBtn = document.getElementById("minimize-btn");
   const titleBar = document.getElementById("title-bar");
-  const container = document.querySelector(".container");
   const appWindow = getCurrentWindow();
 
   closeBtn?.addEventListener("click", async () => {
@@ -515,25 +523,16 @@ async function setupTitleBar(): Promise<void> {
     await appWindow.minimize();
   });
 
-  // Focus window when clicking anywhere on container (for Linux transparent windows)
-  // Fire-and-forget to avoid blocking mouse events
-  container?.addEventListener("mousedown", () => {
-    appWindow.setFocus();
-  });
 
   // Enable dragging on title bar (fallback for Linux)
   if (titleBar) {
-    titleBar.addEventListener("mousedown", (e) => {
+    titleBar.addEventListener("mousedown", async (e) => {
       // Only drag if clicking on the title bar itself, not buttons
       if ((e.target as HTMLElement).closest(".title-buttons")) return;
       if ((e.target as HTMLElement).closest(".settings-panel")) return;
       if (e.button === 0) { // Left mouse button only
-        e.preventDefault();
-        isDragging = true;
-        // Fire-and-forget to avoid blocking drag start
-        appWindow.startDragging().finally(() => {
-          isDragging = false;
-        });
+        // Don't preventDefault - Tauri needs native events for dragging
+        await appWindow.startDragging();
       }
     });
   }
@@ -563,32 +562,6 @@ function setupSettings(): void {
   }
 }
 
-async function logWebKitEnv(): Promise<void> {
-  try {
-    const env = await invoke<Record<string, string>>("get_webkit_env");
-    console.log("WebKit environment variables:", env);
-    const expected = [
-      "WEBKIT_DISABLE_COMPOSITING_MODE",
-      "WEBKIT_DISABLE_DMABUF_RENDERER",
-      "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS",
-      "WEBKIT_USE_SINGLE_WEB_PROCESS",
-      "WEBKIT_DISABLE_GPU",
-    ];
-    const missing = expected.filter((v) => !(v in env));
-    if (missing.length > 0) {
-      console.warn("Missing WebKit environment variables:", missing);
-      // Show warning in UI for debugging
-      const errorEl = document.getElementById("error");
-      if (errorEl) {
-        errorEl.style.display = "block";
-        errorEl.textContent = `Missing WebKit env: ${missing.join(", ")}`;
-      }
-    }
-  } catch (e) {
-    console.error("Failed to get WebKit env:", e);
-  }
-}
-
 window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   setupTitleBar();
@@ -596,15 +569,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("refresh-btn")?.addEventListener("click", fetchUsage);
 
-  // Log WebKit environment for debugging connection issues
-  logWebKitEnv();
-
-  // Small delay before first invoke to ensure WebKit IPC is fully initialized
-  // This helps avoid "Could not connect to localhost" errors on slow system startups
+  // Delay before first invoke to ensure WebKit IPC is fully initialized
   setTimeout(() => {
     fetchUsage();
     setupFileWatcher();
     setupSuspendHandler();
-    setInterval(fetchUsage, 10000);
-  }, 100);
+    // Refresh data every 30 seconds (reduced from 10s to minimize IPC load)
+    setInterval(fetchUsage, 30000);
+  }, 500);
 });

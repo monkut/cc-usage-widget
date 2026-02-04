@@ -24,14 +24,16 @@ html {
 }
 
 .container {
-  background: rgba(20, 20, 30, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(20, 20, 30, 0.95);
+  /* backdrop-filter disabled - causes performance issues on Linux WebKitGTK */
+  /* backdrop-filter: blur(20px); */
+  /* -webkit-backdrop-filter: blur(20px); */
   border-radius: 12px;
   padding: 0 14px 14px 14px;
   margin: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  /* box-shadow disabled - causes performance issues on Linux WebKitGTK */
+  /* box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); */
   overflow: hidden;
   height: calc(100vh - 12px);
   display: flex;
@@ -49,7 +51,6 @@ html {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   cursor: grab;
   user-select: none;
-  -webkit-app-region: drag;
   min-height: 40px;
 }
 
@@ -67,7 +68,6 @@ html {
 .title-buttons {
   display: flex;
   gap: 6px;
-  -webkit-app-region: no-drag;
 }
 
 .title-btn {
@@ -82,8 +82,7 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
-  -webkit-app-region: no-drag;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .title-btn:hover {
@@ -220,7 +219,7 @@ html {
 .quota-bar {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .quota-details {
@@ -260,6 +259,7 @@ html {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  align-items: flex-end;
 }
 
 .heatmap-row {
@@ -299,7 +299,7 @@ html {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
   z-index: 100;
   margin-bottom: 4px;
 }
@@ -373,7 +373,7 @@ html {
 
 .weekly-usage-chart .week-bar rect {
   fill: rgba(96, 165, 250, 0.7);
-  transition: fill 0.2s ease;
+  /* transition disabled - causes performance issues on Linux WebKitGTK */
 }
 
 .weekly-usage-chart .week-bar.today rect {
@@ -390,14 +390,21 @@ html {
   fill: rgba(251, 146, 60, 0.8);
 }
 
-.weekly-usage-chart .day-label {
-  font-size: 5px;
-  fill: rgba(255, 255, 255, 0.4);
-  text-anchor: middle;
+.weekly-day-labels {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 4px;
 }
 
-.weekly-usage-chart .week-bar.today .day-label {
-  fill: rgba(255, 255, 255, 0.8);
+.weekly-day-labels .day-label {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  flex: 1;
+}
+
+.weekly-day-labels .day-label.today {
+  color: rgba(255, 255, 255, 0.8);
   font-weight: bold;
 }
 
@@ -484,6 +491,9 @@ html {
   border: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sessions-section h3 {
@@ -542,9 +552,8 @@ html {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  flex: 1;
   min-height: 0;
-  /* Show up to 5 sessions before scrolling: 5 rows * ~24px each */
-  max-height: 120px;
 }
 
 .sessions-list::-webkit-scrollbar {

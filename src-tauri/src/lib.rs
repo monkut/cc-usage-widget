@@ -14,9 +14,13 @@ use usage::{get_claude_data_dirs, get_current_usage, UsageStats};
 use dbus_service::DbusServiceHandle;
 
 
+/// Async command to fetch usage stats without blocking the main thread.
+/// File I/O is offloaded to a blocking thread pool.
 #[tauri::command]
-fn get_usage(period: &str) -> Result<UsageStats, String> {
-    get_current_usage(period)
+async fn get_usage(period: String) -> Result<UsageStats, String> {
+    tauri::async_runtime::spawn_blocking(move || get_current_usage(&period))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
