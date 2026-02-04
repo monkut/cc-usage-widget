@@ -173,14 +173,24 @@ function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
   const startDate = new Date(endDate);
   startDate.setDate(endDate.getDate() - 83);
 
+  // Helper to format date as YYYY-MM-DD in local timezone
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayStr = formatLocalDate(today);
+
   // Generate all 84 days (12 complete weeks)
   const days: { date: string; count: number; dayOfWeek: number; isFuture: boolean }[] = [];
   for (let i = 0; i < 84; i++) {
     const d = new Date(startDate);
     d.setDate(startDate.getDate() + i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = formatLocalDate(d);
     const count = activityMap.get(dateStr) || 0;
-    const isFuture = d > today;
+    const isFuture = dateStr > todayStr;
     days.push({ date: dateStr, count, dayOfWeek: d.getDay(), isFuture });
   }
 
@@ -285,7 +295,7 @@ function renderWeeklyUsageChart(weeklyUsage: WeeklyUsage): string {
 
   return `
     <div class="weekly-usage-chart">
-      <svg viewBox="0 0 ${svgWidth} ${chartHeight + 15}" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${svgWidth} ${chartHeight + 15}" preserveAspectRatio="none">
         <!-- Pace line (target trajectory) -->
         <polyline class="pace-line" points="${paceLinePoints}" fill="none"/>
         <!-- Bars -->
@@ -515,11 +525,6 @@ async function setupTitleBar(): Promise<void> {
     await appWindow.minimize();
   });
 
-  // Focus window when clicking anywhere on container (for Linux transparent windows)
-  // Fire-and-forget to avoid blocking mouse events
-  container?.addEventListener("mousedown", () => {
-    appWindow.setFocus();
-  });
 
   // Enable dragging on title bar (fallback for Linux)
   if (titleBar) {
@@ -596,15 +601,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("refresh-btn")?.addEventListener("click", fetchUsage);
 
-  // Log WebKit environment for debugging connection issues
-  logWebKitEnv();
-
-  // Small delay before first invoke to ensure WebKit IPC is fully initialized
-  // This helps avoid "Could not connect to localhost" errors on slow system startups
+  // Delay before first invoke to ensure WebKit IPC is fully initialized
   setTimeout(() => {
     fetchUsage();
     setupFileWatcher();
     setupSuspendHandler();
-    setInterval(fetchUsage, 10000);
-  }, 100);
+    // Refresh data every 30 seconds (reduced from 10s to minimize IPC load)
+    setInterval(fetchUsage, 30000);
+  }, 500);
 });

@@ -151,8 +151,8 @@ pub fn spawn_dbus_service() -> Option<DbusServiceHandle> {
         });
     });
 
-    // Wait for the service to initialize (with timeout)
-    rx.recv_timeout(std::time::Duration::from_secs(5)).ok().flatten()
+    // Wait for the service to initialize (with short timeout to avoid blocking app startup)
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok().flatten()
 }
 
 impl Clone for UsageService {
