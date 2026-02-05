@@ -482,15 +482,15 @@ pub fn aggregate_usage(
     let total_cost: f64 = model_usages.iter().map(|m| m.cost_usd).sum();
 
     // Estimate quota - Max 5x plan defaults (based on Anthropic docs: 50-200 prompts/5hr)
-    // Using 217 as the base limit for Sonnet-equivalent prompts (calibrated to match Claude /usage)
+    // Using 500 as the base limit for Sonnet-equivalent prompts (calibrated to match Claude /usage)
     // Weighted count accounts for model costs (Opus counts 2.75x, Haiku counts 0.25x)
-    let estimated_limit: u32 = 217;
+    let estimated_limit: u32 = 500;
     let usage_percent = (quota_window_weighted / estimated_limit as f64 * 100.0).min(100.0);
 
     // Weekly limit estimation - calibrated to match Claude /usage output
-    // Based on observed data: weekly limit is roughly 2990 Sonnet-equivalent prompts
+    // Based on observed data: weekly limit is roughly 2590 Sonnet-equivalent prompts
     let week_limit_hours: u32 = 210;
-    let week_estimated_prompts: u32 = 2990; // Calibrated based on observed Claude /usage
+    let week_estimated_prompts: u32 = 2590; // Calibrated based on observed Claude /usage
     let week_usage_percent = (week_weighted / week_estimated_prompts as f64 * 100.0).min(100.0);
 
     let quota = QuotaInfo {
