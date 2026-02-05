@@ -165,6 +165,17 @@ function getRollingExpectedPercent(windowHours: number): number {
   return ((minutesIntoWindow + 1) / windowMinutes) * 100;
 }
 
+function getRollingRemainingTime(windowHours: number): string {
+  const now = new Date();
+  const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+  const windowMinutes = windowHours * 60;
+  const minutesIntoWindow = minutesSinceMidnight % windowMinutes;
+  const minutesRemaining = windowMinutes - minutesIntoWindow;
+  const hours = Math.floor(minutesRemaining / 60);
+  const minutes = minutesRemaining % 60;
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+}
+
 function formatUsageDiff(actual: number, expected: number): string {
   const diff = actual - expected;
   const sign = diff >= 0 ? "+" : "";
@@ -378,6 +389,7 @@ async function fetchUsage(): Promise<void> {
       const rollingDiff = stats.quota.usage_percent - expectedRollingPercent;
       const quotaColor = getWeekDiffColor(rollingDiff);
       const rollingDiffText = formatUsageDiff(stats.quota.usage_percent, expectedRollingPercent);
+      const rollingRemainingTime = getRollingRemainingTime(stats.quota.window_hours);
 
       const expectedWeekPercent = getWeeklyExpectedPercent();
       const weekDiff = stats.quota.week_usage_percent - expectedWeekPercent;
@@ -395,7 +407,7 @@ async function fetchUsage(): Promise<void> {
               <div class="quota-bar" style="width: ${stats.quota.usage_percent}%; background: ${quotaColor};"></div>
             </div>
             <div class="quota-details">
-              <span class="quota-percent" style="color: ${quotaColor};">${stats.quota.usage_percent.toFixed(1)}% ${rollingDiffText}</span>
+              <span class="quota-percent" style="color: ${quotaColor};">${stats.quota.usage_percent.toFixed(1)}% ${rollingDiffText} ${rollingRemainingTime}</span>
               <span class="quota-count">${stats.quota.messages_in_window}/${stats.quota.estimated_limit}</span>
             </div>
           </div>
