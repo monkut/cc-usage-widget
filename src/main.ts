@@ -119,10 +119,10 @@ function getModelClass(model: string): string {
   return "";
 }
 
-function getQuotaColor(percent: number): string {
-  if (percent >= 80) return "#ef4444";
-  if (percent >= 50) return "#f59e0b";
-  return "#22c55e";
+function getWeekDiffColor(diffPercent: number): string {
+  if (diffPercent < 0) return "#22c55e"; // Green - under expected
+  if (diffPercent <= 5) return "#f59e0b"; // Orange - slightly over
+  return "#ef4444"; // Red - significantly over
 }
 
 function formatDuration(minutes: number): string {
@@ -148,6 +148,27 @@ function getNextWeeklyReset(): string {
   const resetDate = new Date(now);
   resetDate.setDate(now.getDate() + daysUntilReset);
   return `${resetDate.getMonth() + 1}/${resetDate.getDate()}`;
+}
+
+function getWeeklyExpectedPercent(): number {
+  const dayOfWeek = new Date().getDay(); // 0 = Sunday
+  // Week starts on Sunday (day 1), ends Saturday (day 7)
+  const currentDay = dayOfWeek + 1;
+  return (currentDay / 7) * 100;
+}
+
+function getRollingExpectedPercent(windowHours: number): number {
+  const now = new Date();
+  const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+  const windowMinutes = windowHours * 60;
+  const minutesIntoWindow = minutesSinceMidnight % windowMinutes;
+  return ((minutesIntoWindow + 1) / windowMinutes) * 100;
+}
+
+function formatUsageDiff(actual: number, expected: number): string {
+  const diff = actual - expected;
+  const sign = diff >= 0 ? "+" : "";
+  return `(${sign}${diff.toFixed(0)}%)`;
 }
 
 function renderActivityHeatmap(dailyActivity: DailyActivity[]): string {
@@ -353,8 +374,15 @@ async function fetchUsage(): Promise<void> {
       loadingEl.style.display = "none";
       errorEl.style.display = "none";
 
-      const quotaColor = getQuotaColor(stats.quota.usage_percent);
-      const weekColor = getQuotaColor(stats.quota.week_usage_percent);
+      const expectedRollingPercent = getRollingExpectedPercent(stats.quota.window_hours);
+      const rollingDiff = stats.quota.usage_percent - expectedRollingPercent;
+      const quotaColor = getWeekDiffColor(rollingDiff);
+      const rollingDiffText = formatUsageDiff(stats.quota.usage_percent, expectedRollingPercent);
+
+      const expectedWeekPercent = getWeeklyExpectedPercent();
+      const weekDiff = stats.quota.week_usage_percent - expectedWeekPercent;
+      const weekColor = getWeekDiffColor(weekDiff);
+      const weekDiffText = formatUsageDiff(stats.quota.week_usage_percent, expectedWeekPercent);
 
       statsEl.innerHTML = `
       <div class="quota-section">
@@ -367,7 +395,7 @@ async function fetchUsage(): Promise<void> {
               <div class="quota-bar" style="width: ${stats.quota.usage_percent}%; background: ${quotaColor};"></div>
             </div>
             <div class="quota-details">
-              <span class="quota-percent" style="color: ${quotaColor};">${stats.quota.usage_percent.toFixed(1)}%</span>
+              <span class="quota-percent" style="color: ${quotaColor};">${stats.quota.usage_percent.toFixed(1)}% ${rollingDiffText}</span>
               <span class="quota-count">${stats.quota.messages_in_window}/${stats.quota.estimated_limit}</span>
             </div>
           </div>
@@ -380,7 +408,7 @@ async function fetchUsage(): Promise<void> {
               <div class="quota-bar" style="width: ${stats.quota.week_usage_percent}%; background: ${weekColor};"></div>
             </div>
             <div class="quota-details">
-              <span class="quota-percent" style="color: ${weekColor};">${stats.quota.week_usage_percent.toFixed(1)}%</span>
+              <span class="quota-percent" style="color: ${weekColor};">${stats.quota.week_usage_percent.toFixed(1)}% ${weekDiffText}</span>
               <span class="quota-count">${stats.quota.plan}</span>
             </div>
           </div>
