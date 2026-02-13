@@ -148,7 +148,7 @@ fn parse_user_prompt_timestamp(line: &str) -> Option<String> {
     entry.get("timestamp").and_then(|t| t.as_str()).map(|s| s.to_string())
 }
 
-fn get_model_display_name(model: &str) -> String {
+pub fn get_model_display_name(model: &str) -> String {
     // Extract meaningful parts from model ID like "claude-opus-4-5-20251101"
     if model.contains("opus-4-5") || model.contains("opus-4.5") {
         "Opus 4.5".to_string()
@@ -182,7 +182,7 @@ fn get_model_pricing(model: &str) -> (f64, f64, f64, f64) {
     }
 }
 
-fn calculate_cost(model: &str, tokens: &TokenUsage) -> f64 {
+pub fn calculate_cost(model: &str, tokens: &TokenUsage) -> f64 {
     let (input_price, output_price, cache_write_price, cache_read_price) = get_model_pricing(model);
     let million = 1_000_000.0;
 
@@ -367,28 +367,14 @@ pub fn parse_usage_from_file(path: &PathBuf) -> Result<Vec<ParsedEntry>, String>
     Ok(usages)
 }
 
-pub fn aggregate_usage(
-    entries: Vec<ParsedEntry>,
-    since: Option<DateTime<Utc>>,
-    quota_window_prompts: u32,
-    quota_window_weighted: f64,
-    _week_prompts: u32,
-    week_weighted: f64,
-    daily_activity: Vec<DailyActivity>,
-    weekly_usage: WeeklyUsage,
-) -> UsageStats {
-    let mut by_model: HashMap<String, TokenUsage> = HashMap::new();
-    let mut total = TokenUsage::default();
-    let mut latest_timestamp = String::new();
-    let mut message_count: u32 = 0;
-
-    // Track active sessions (last 24 hours)
-    // session_id -> (cwd, first_activity, last_activity, count, total_tokens, cost, last_model, current_context_tokens)
+/// Build active sessions from parsed entries (last 24 hours)
+pub fn build_active_sessions(entries: Vec<ParsedEntry>) -> Vec<ActiveSession> {
     let day_ago = Utc::now() - chrono::Duration::hours(24);
-    let mut session_data: HashMap<String, (String, String, String, u32, u64, f64, String, u64)> = HashMap::new();
+    // session_id -> (cwd, first_activity, last_activity, count, total_tokens, cost, last_model, current_context_tokens)
+    let mut session_data: HashMap<String, (String, String, String, u32, u64, f64, String, u64)> =
+        HashMap::new();
 
-    for entry in entries {
-        // Track sessions active in last 24 hours
+    for entry in &entries {
         if let Ok(ts) = DateTime::parse_from_rfc3339(&entry.timestamp) {
             if ts >= day_ago && !entry.session_id.is_empty() {
                 let entry_tokens = entry.tokens.input_tokens
@@ -396,7 +382,6 @@ pub fn aggregate_usage(
                     + entry.tokens.cache_creation_input_tokens
                     + entry.tokens.cache_read_input_tokens;
                 let entry_cost = calculate_cost(&entry.model, &entry.tokens);
-                // Current context = cached context + new tokens being added
                 let context_tokens = entry.tokens.cache_read_input_tokens
                     + entry.tokens.cache_creation_input_tokens
                     + entry.tokens.input_tokens;
@@ -413,22 +398,97 @@ pub fn aggregate_usage(
                         entry.model.clone(),
                         context_tokens,
                     ));
-                // Update first_activity if earlier
                 if entry.timestamp < session.1 {
                     session.1 = entry.timestamp.clone();
                 }
-                // Update last_activity, model, and current context if later
                 if entry.timestamp > session.2 {
                     session.2 = entry.timestamp.clone();
-                    session.6 = entry.model.clone(); // update to most recent model
-                    session.7 = context_tokens; // update current context from most recent message
+                    session.6 = entry.model.clone();
+                    session.7 = context_tokens;
                 }
-                session.3 += 1; // message count
-                session.4 += entry_tokens; // total tokens
-                session.5 += entry_cost; // cost
+                session.3 += 1;
+                session.4 += entry_tokens;
+                session.5 += entry_cost;
             }
         }
+    }
 
+    let mut active_sessions: Vec<ActiveSession> = session_data
+        .into_iter()
+        .map(
+            |(
+                session_id,
+                (
+                    cwd,
+                    first_activity,
+                    last_activity,
+                    msg_count,
+                    total_tokens,
+                    cost,
+                    model,
+                    current_context_tokens,
+                ),
+            )| {
+                let directory = cwd.clone();
+                let short_project = directory
+                    .split('/')
+                    .last()
+                    .unwrap_or(&cwd)
+                    .to_string();
+
+                let duration_minutes = if let (Ok(first), Ok(last)) = (
+                    DateTime::parse_from_rfc3339(&first_activity),
+                    DateTime::parse_from_rfc3339(&last_activity),
+                ) {
+                    ((last - first).num_minutes().max(0)) as u32
+                } else {
+                    0
+                };
+
+                let model_display_name = get_model_display_name(&model);
+                let context_remaining_percent =
+                    calculate_context_remaining(current_context_tokens, &model);
+                let todo_count = get_pending_todo_count(&session_id);
+
+                ActiveSession {
+                    session_id: session_id.chars().take(8).collect(),
+                    project: short_project,
+                    directory,
+                    first_activity,
+                    last_activity,
+                    duration_minutes,
+                    message_count: msg_count,
+                    total_tokens,
+                    cost_usd: cost,
+                    model,
+                    model_display_name,
+                    context_remaining_percent,
+                    todo_count,
+                }
+            },
+        )
+        .collect();
+
+    active_sessions.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    active_sessions
+}
+
+pub fn aggregate_usage(
+    entries: Vec<ParsedEntry>,
+    since: Option<DateTime<Utc>>,
+    quota_window_prompts: u32,
+    quota_window_weighted: f64,
+    _week_prompts: u32,
+    week_weighted: f64,
+    daily_activity: Vec<DailyActivity>,
+    weekly_usage: WeeklyUsage,
+) -> UsageStats {
+    let mut by_model: HashMap<String, TokenUsage> = HashMap::new();
+    let mut total = TokenUsage::default();
+    let mut latest_timestamp = String::new();
+    let mut message_count: u32 = 0;
+
+    for entry in &entries {
         // Filter by date if specified for totals
         if let Some(since_dt) = since {
             if let Ok(ts) = DateTime::parse_from_rfc3339(&entry.timestamp) {
@@ -445,7 +505,7 @@ pub fn aggregate_usage(
         }
 
         // Aggregate by model
-        let model_entry = by_model.entry(entry.model).or_default();
+        let model_entry = by_model.entry(entry.model.clone()).or_default();
         model_entry.input_tokens += entry.tokens.input_tokens;
         model_entry.output_tokens += entry.tokens.output_tokens;
         model_entry.cache_creation_input_tokens += entry.tokens.cache_creation_input_tokens;
@@ -503,55 +563,7 @@ pub fn aggregate_usage(
         week_limit_hours,
     };
 
-    // Build active sessions list
-    let mut active_sessions: Vec<ActiveSession> = session_data
-        .into_iter()
-        .map(|(session_id, (cwd, first_activity, last_activity, msg_count, total_tokens, cost, model, current_context_tokens))| {
-            // Use cwd directly as directory (it's the actual working directory from JSONL)
-            let directory = cwd.clone();
-
-            // Shorten for display - get last path component
-            let short_project = directory
-                .split('/')
-                .last()
-                .unwrap_or(&cwd)
-                .to_string();
-
-            // Calculate duration in minutes
-            let duration_minutes = if let (Ok(first), Ok(last)) = (
-                DateTime::parse_from_rfc3339(&first_activity),
-                DateTime::parse_from_rfc3339(&last_activity),
-            ) {
-                ((last - first).num_minutes().max(0)) as u32
-            } else {
-                0
-            };
-
-            let model_display_name = get_model_display_name(&model);
-            // Use current context tokens (from most recent message) for context remaining calculation
-            let context_remaining_percent = calculate_context_remaining(current_context_tokens, &model);
-            let todo_count = get_pending_todo_count(&session_id);
-
-            ActiveSession {
-                session_id: session_id.chars().take(8).collect(),
-                project: short_project,
-                directory,
-                first_activity,
-                last_activity,
-                duration_minutes,
-                message_count: msg_count,
-                total_tokens,
-                cost_usd: cost,
-                model,
-                model_display_name,
-                context_remaining_percent,
-                todo_count,
-            }
-        })
-        .collect();
-
-    // Sort by last activity (most recent first)
-    active_sessions.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    let active_sessions = build_active_sessions(entries);
 
     UsageStats {
         total_tokens: total,
@@ -633,7 +645,7 @@ fn is_user_prompt(line: &str) -> bool {
 
 /// Count model-weighted usage in a time window
 /// Counts user prompts weighted by the model of the subsequent assistant response
-fn count_weighted_usage_in_window(files: &[PathBuf], hours: i64) -> f64 {
+pub fn count_weighted_usage_in_window(files: &[PathBuf], hours: i64) -> f64 {
     let window_start = Utc::now() - chrono::Duration::hours(hours);
     let mut weighted_count: f64 = 0.0;
 
@@ -684,7 +696,7 @@ fn count_weighted_usage_in_window(files: &[PathBuf], hours: i64) -> f64 {
 }
 
 /// Count actual user prompts (excluding tool_result-only messages) in a time window
-fn count_user_prompts_in_window(files: &[PathBuf], hours: i64) -> u32 {
+pub fn count_user_prompts_in_window(files: &[PathBuf], hours: i64) -> u32 {
     let window_start = Utc::now() - chrono::Duration::hours(hours);
     let mut count: u32 = 0;
 
@@ -720,7 +732,7 @@ fn count_user_prompts_in_window(files: &[PathBuf], hours: i64) -> u32 {
 }
 
 /// Compute weekly usage breakdown for the current week (Sunday to Saturday)
-fn compute_weekly_usage(daily_activity: &[DailyActivity]) -> WeeklyUsage {
+pub fn compute_weekly_usage(daily_activity: &[DailyActivity]) -> WeeklyUsage {
     use chrono::Datelike;
 
     let today = Utc::now().date_naive();
@@ -770,7 +782,7 @@ fn compute_weekly_usage(daily_activity: &[DailyActivity]) -> WeeklyUsage {
 }
 
 /// Collect daily user prompt counts for the last 12 weeks (84 days)
-fn collect_daily_activity(files: &[PathBuf]) -> Vec<DailyActivity> {
+pub fn collect_daily_activity(files: &[PathBuf]) -> Vec<DailyActivity> {
     let mut daily_counts: HashMap<String, u32> = HashMap::new();
     let twelve_weeks_ago = Utc::now() - chrono::Duration::days(84);
 

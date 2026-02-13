@@ -602,16 +602,139 @@ function setupSettings(): void {
   }
 }
 
+async function setupApiKeySettings(): Promise<void> {
+  const input = document.getElementById("api-key-input") as HTMLInputElement;
+  const saveBtn = document.getElementById("api-key-save-btn");
+  const clearBtn = document.getElementById("api-key-clear-btn");
+  const statusEl = document.getElementById("api-key-status");
+
+  if (!input || !saveBtn || !clearBtn || !statusEl) return;
+
+  // Load current status
+  try {
+    const status: Record<string, string> = await invoke("get_api_key_status");
+    if (status.configured === "true") {
+      statusEl.textContent = `Configured: ${status.masked_key}`;
+      statusEl.className = "api-key-status configured";
+      input.placeholder = status.masked_key || "sk-ant-admin...";
+    }
+  } catch (e) {
+    console.error("Failed to load API key status:", e);
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    const key = input.value.trim();
+    if (!key) return;
+
+    statusEl.textContent = "Validating...";
+    statusEl.className = "api-key-status validating";
+
+    try {
+      await invoke("validate_api_key", { key });
+      const maskedKey: string = await invoke("set_api_key", { key });
+      statusEl.textContent = `Configured: ${maskedKey}`;
+      statusEl.className = "api-key-status configured";
+      input.value = "";
+      input.placeholder = maskedKey;
+      fetchUsage();
+    } catch (e) {
+      statusEl.textContent = `Invalid: ${e}`;
+      statusEl.className = "api-key-status error";
+    }
+  });
+
+  clearBtn.addEventListener("click", async () => {
+    try {
+      await invoke("clear_api_key");
+      statusEl.textContent = "API key cleared";
+      statusEl.className = "api-key-status";
+      input.placeholder = "sk-ant-admin...";
+      setTimeout(() => {
+        statusEl.textContent = "";
+      }, 2000);
+      fetchUsage();
+    } catch (e) {
+      statusEl.textContent = `Error: ${e}`;
+      statusEl.className = "api-key-status error";
+    }
+  });
+}
+
+async function showApiKeyModal(): Promise<void> {
+  try {
+    const status: Record<string, string> = await invoke("get_api_key_status");
+    if (status.configured === "true") return;
+  } catch (e) {
+    console.error("Failed to check API key status:", e);
+    return;
+  }
+
+  const overlay = document.getElementById("api-key-modal");
+  const input = document.getElementById("modal-api-key-input") as HTMLInputElement;
+  const saveBtn = document.getElementById("modal-save-btn") as HTMLButtonElement;
+  const skipBtn = document.getElementById("modal-skip-btn");
+  const statusEl = document.getElementById("modal-status");
+
+  if (!overlay || !input || !saveBtn || !skipBtn || !statusEl) return;
+
+  overlay.style.display = "flex";
+
+  const closeModal = () => {
+    overlay.style.display = "none";
+  };
+
+  saveBtn.addEventListener("click", async () => {
+    const key = input.value.trim();
+    if (!key) return;
+
+    saveBtn.disabled = true;
+    statusEl.textContent = "Validating...";
+    statusEl.className = "modal-status validating";
+
+    try {
+      await invoke("validate_api_key", { key });
+      const maskedKey: string = await invoke("set_api_key", { key });
+      statusEl.textContent = `Configured: ${maskedKey}`;
+      statusEl.className = "modal-status success";
+
+      // Update settings panel state
+      const settingsInput = document.getElementById("api-key-input") as HTMLInputElement;
+      const settingsStatus = document.getElementById("api-key-status");
+      if (settingsInput) {
+        settingsInput.value = "";
+        settingsInput.placeholder = maskedKey;
+      }
+      if (settingsStatus) {
+        settingsStatus.textContent = `Configured: ${maskedKey}`;
+        settingsStatus.className = "api-key-status configured";
+      }
+
+      setTimeout(() => {
+        closeModal();
+        fetchUsage();
+      }, 600);
+    } catch (e) {
+      statusEl.textContent = `Invalid: ${e}`;
+      statusEl.className = "modal-status error";
+      saveBtn.disabled = false;
+    }
+  });
+
+  skipBtn.addEventListener("click", closeModal);
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   setupTitleBar();
   setupSettings();
+  setupApiKeySettings();
 
   document.getElementById("refresh-btn")?.addEventListener("click", fetchUsage);
 
   // Delay before first invoke to ensure WebKit IPC is fully initialized
-  setTimeout(() => {
-    fetchUsage();
+  setTimeout(async () => {
+    await fetchUsage();
+    showApiKeyModal();
     setupFileWatcher();
     setupSuspendHandler();
     // Refresh data every 30 seconds (reduced from 10s to minimize IPC load)
