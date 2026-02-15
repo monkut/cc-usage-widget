@@ -1,8 +1,11 @@
+mod api;
+mod config;
 #[cfg(target_os = "linux")]
 mod dbus_service;
 mod usage;
 
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashMap;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
@@ -14,13 +17,70 @@ use usage::{get_claude_data_dirs, get_current_usage, UsageStats};
 use dbus_service::DbusServiceHandle;
 
 
-/// Async command to fetch usage stats without blocking the main thread.
+/// Async command to fetch usage stats.
+/// If an Admin API key is configured, fetches from the API first with local fallback.
 /// File I/O is offloaded to a blocking thread pool.
 #[tauri::command]
 async fn get_usage(period: String) -> Result<UsageStats, String> {
+    // Check if API key is configured
+    let cfg = config::load_config();
+    if let Some(ref api_key) = cfg.admin_api_key {
+        if !api_key.is_empty() {
+            match get_usage_from_api(api_key).await {
+                Ok(stats) => return Ok(stats),
+                Err(e) => {
+                    eprintln!("API fetch failed, falling back to local: {e}");
+                }
+            }
+        }
+    }
+
+    // Fall back to local JSONL parsing
     tauri::async_runtime::spawn_blocking(move || get_current_usage(&period))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
+}
+
+async fn get_usage_from_api(api_key: &str) -> Result<UsageStats, String> {
+    let client = api::AdminApiClient::new(api_key)?;
+    api::build_usage_stats_from_api(&client).await
+}
+
+#[tauri::command]
+async fn set_api_key(key: String) -> Result<String, String> {
+    let mut cfg = config::load_config();
+    cfg.admin_api_key = Some(key.clone());
+    config::save_config(&cfg)?;
+    Ok(config::mask_api_key(&key))
+}
+
+#[tauri::command]
+fn get_api_key_status() -> HashMap<String, String> {
+    let cfg = config::load_config();
+    let mut status = HashMap::new();
+    match cfg.admin_api_key {
+        Some(ref key) if !key.is_empty() => {
+            status.insert("configured".to_string(), "true".to_string());
+            status.insert("masked_key".to_string(), config::mask_api_key(key));
+        }
+        _ => {
+            status.insert("configured".to_string(), "false".to_string());
+        }
+    }
+    status
+}
+
+#[tauri::command]
+async fn clear_api_key() -> Result<(), String> {
+    let mut cfg = config::load_config();
+    cfg.admin_api_key = None;
+    config::save_config(&cfg)
+}
+
+#[tauri::command]
+async fn validate_api_key(key: String) -> Result<(), String> {
+    let client = api::AdminApiClient::new(&key)?;
+    client.validate().await
 }
 
 #[tauri::command]
@@ -233,7 +293,15 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_usage, get_data_dirs, get_webkit_env])
+        .invoke_handler(tauri::generate_handler![
+            get_usage,
+            get_data_dirs,
+            get_webkit_env,
+            set_api_key,
+            get_api_key_status,
+            clear_api_key,
+            validate_api_key,
+        ])
         .setup(move |app| {
             // Initialize D-Bus service on Linux
             // Runs on a dedicated thread with its own tokio runtime to keep the connection alive
